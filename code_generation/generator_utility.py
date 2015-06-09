@@ -277,9 +277,6 @@ class FO_Result:
     return self.output_precision
 
   
-        
-
-
 
 class FunctionOperator(ML_CG_Operator):
     def __init__(self, function_name, arg_map = None, pre_process = None, declare_prototype = None, **kwords):

@@ -12,12 +12,15 @@
 
 
 from ..utility.common import ML_NotImplemented
-from ..core.ml_operations import Variable, Constant, ConditionBlock, Return, TableLoad, Statement, SpecificOperation, ExceptionOperation, ClearException, NoResultOperation, SwitchBlock, FunctionObject, ReferenceAssign
+from ..utility.log_report import Log
+
+from ..core.ml_operations import Variable, Constant, ConditionBlock, Return, TableLoad, Statement, Loop, SpecificOperation, ExceptionOperation, ClearException, NoResultOperation, SwitchBlock, FunctionObject, ReferenceAssign
 from ..core.ml_table import ML_Table
 from ..core.ml_formats import *
 from ..core.attributes import ML_Debug
 from .code_constant import C_Code
-from .code_element import CodeFunction, CodeVariable, CodeExpression
+from .code_element import CodeVariable, CodeExpression
+from .code_function import CodeFunction
 
 
 class CCodeGenerator: 
@@ -86,19 +89,25 @@ class CCodeGenerator:
             result = optree
 
         elif isinstance(optree, Variable):
-            result = CodeVariable(optree.get_tag(), optree.get_precision())
+            if optree.get_var_type() is Variable.Local:
+              final_var =  code_object.get_free_var_name(optree.get_precision(), prefix = optree.get_tag(), declare = True)
+              result = CodeVariable(final_var, optree.get_precision())
+            else:
+              result = CodeVariable(optree.get_tag(), optree.get_precision())
 
         elif isinstance(optree, Constant):
             precision = optree.get_precision()
-            if self.declare_cst:
+            if self.declare_cst or optree.get_precision().is_cst_decl_required():
                 cst_varname = code_object.declare_cst(optree)
                 result = CodeVariable(cst_varname, precision)
             else:
-                try:
-                    result = CodeExpression(precision.get_c_cst(optree.get_value()), precision)
-                except:
-                  print optree.get_str(display_precision = True)
-                  raise Exception()
+                if precision is ML_Integer:
+                  result = CodeExpression("%d" % optree.get_value(), precision)
+                else:
+                  try:
+                      result = CodeExpression(precision.get_c_cst(optree.get_value()), precision)
+                  except:
+                    Log.report(Log.Error, "Error during get_c_cst call for Constant: %s " % optree.get_str(display_precision = True)) # Exception print
 
         elif isinstance(optree, TableLoad):
             # declaring table
@@ -109,6 +118,14 @@ class CCodeGenerator:
             index_code = [self.generate_expr(code_object, index_op, folded = folded).get() for index_op in optree.inputs[1:]]
 
             result = CodeExpression("%s[%s]" % (table_name, "][".join(index_code)), optree.inputs[0].get_storage_precision())
+
+            # manually enforcing folding
+            if folded:
+                prefix = optree.get_tag(default = "tmp")
+                result_varname = result_var if result_var != None else code_object.get_free_var_name(optree.get_precision(), prefix = prefix)
+                code_object << self.generate_assignation(result_varname, result.get()) 
+                result = CodeVariable(result_varname, optree.get_precision())
+
 
         elif isinstance(optree, SwitchBlock):
             switch_value = optree.inputs[0]
@@ -140,11 +157,33 @@ class CCodeGenerator:
             result_value = optree.inputs[1]
 
             output_var_code   = self.generate_expr(code_object, output_var, folded = False)
-            result_value_code = self.generate_expr(code_object, result_value, result_var = output_var_code.get(), folded = folded)
+
+            if isinstance(result_value, Constant):
+              # generate assignation
+              result_value_code = self.generate_expr(code_object, result_value, folded = folded)
+              code_object << self.generate_assignation(output_var_code.get(), result_value_code.get())
+            else:
+              result_value_code = self.generate_expr(code_object, result_value, folded = folded)
+              code_object << self.generate_assignation(output_var_code.get(), result_value_code.get())
+              if optree.get_debug() and not self.disable_debug:
+                code_object << self.generate_debug_msg(result_value, result_value_code, code_object, debug_object = optree.get_debug())
 
             #code_object << self.generate_assignation(output_var_code.get(), result_value_code.get())
             #code_object << output_var.get_precision().generate_c_assignation(output_var_code, result_value_code)
             
+            return None
+
+        elif isinstance(optree, Loop):
+            init_statement = optree.inputs[0]
+            exit_condition = optree.inputs[1]
+            loop_body      = optree.inputs[2]
+
+            self.generate_expr(code_object, init_statement, folded = folded)
+            code_object << "\nfor (;%s;)" % self.generate_expr(code_object, exit_condition, folded = False).get()
+            code_object.open_level()
+            self.generate_expr(code_object, loop_body, folded = folded)
+            code_object.close_level()
+
             return None
 
         elif isinstance(optree, ConditionBlock):
@@ -291,20 +330,24 @@ class CCodeGenerator:
       if isinstance(symbol_object, Constant) or isinstance(symbol_object, Variable):
         final_symbol = ";\n" if final else ""
         init_code = symbol_object.get_precision().generate_c_initialization(symbol, symbol_object)
-        return "%s%s" % (init_code, final_symbol)
+        if init_code != None:
+          return "%s%s" % (init_code, final_symbol)
+        else:
+          return ""
       else:
         return ""
 
 
-    def generate_debug_msg(self, optree, result, code_object):
-        debug_object = optree.get_debug()
+    def generate_debug_msg(self, optree, result, code_object, debug_object = None):
+        debug_object = optree.get_debug() if debug_object is None else debug_object
+        debug_object = debug_object.select_object(optree) if isinstance(debug_object, ML_Debug) else debug_object
         # adding required headers
         if isinstance(debug_object, ML_Debug):
             for header in debug_object.get_require_header():
               code_object.add_header(header)
         precision = optree.get_precision()
         display_format = debug_object.get_display_format(precision.get_c_display_format()) if isinstance(debug_object, ML_Debug) else precision.get_c_display_format()
-        display_result = debug_object.get_pre_process(result.get()) if isinstance(debug_object, ML_Debug) else result.get()
+        display_result = debug_object.get_pre_process(result.get(), optree) if isinstance(debug_object, ML_Debug) else result.get()
         debug_msg = "#ifdef ML_DEBUG\n"
         debug_msg += """printf("%s: %s\\n", %s);\n""" % (optree.get_tag(), display_format, display_result)
         debug_msg += "#endif\n"

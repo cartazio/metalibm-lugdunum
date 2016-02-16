@@ -10,13 +10,14 @@
 # author(s): Nicolas Brunie (nicolas.brunie@kalray.eu)
 ###############################################################################
 
+import sys
 
 from ..utility.common import ML_NotImplemented
 from .code_element import CodeVariable, CodeExpression
-from ..core.ml_operations import Variable, Constant, ConditionBlock, Return, TableLoad, Statement, SpecificOperation
+from ..core.ml_operations import Variable, Constant, ConditionBlock, Return, TableLoad, Statement, SpecificOperation, Conversion
 from ..core.ml_table import ML_Table
 from ..core.ml_formats import *
-from .generator_utility import C_Code, Gappa_Code
+from .generator_utility import C_Code, Gappa_Code, RoundOperator
 from ..core.attributes import ML_Debug
 from .code_object import Gappa_Unknown, GappaCodeObject
 
@@ -85,13 +86,20 @@ class GappaCodeGenerator:
         goal_code = self.generate_expr(code_object, goal_optree, initial = True, language = Gappa_Code)
         code_object.add_goal(goal_code, goal_value)
 
-    def add_hint(self, code_object, hint_hypoth, hint_goal):
+    def add_hint(self, code_object, hint_hypoth, hint_goal, hint_annotation = None, isApprox = False):
         hypoth_code = self.generate_expr(code_object, hint_hypoth, initial = False, folded = False, language = Gappa_Code)
         goal_code = self.generate_expr(code_object, hint_goal, initial = False, folded = False, language = Gappa_Code)
-        code_object.add_hint(hypoth_code, goal_code)
+        if hint_annotation is not None:
+          declare_cst = self.declare_cst
+          self.declare_cst = False
+          annotation_code = self.generate_expr(code_object, hint_annotation, initial = False, folded = False, language = Gappa_Code, strip_outer_parenthesis = True)
+          self.declare_cst = declare_cst
+        else:
+          annotation_code = None
+        code_object.add_hint(hypoth_code, goal_code, annotation_code, isApprox)
 
 
-    def generate_expr(self, code_object, optree, folded = True, result_var = None, initial = False, __exact = None, language = None):
+    def generate_expr(self, code_object, optree, folded = True, result_var = None, initial = False, __exact = None, language = None, strip_outer_parenthesis = False):
         """ code generation function """
         #exact_value = exact or self.get_exact_mode()
 
@@ -128,6 +136,14 @@ class GappaCodeGenerator:
                 result = CodeVariable(cst_varname, precision)
             else:
                 result = CodeExpression(precision.get_gappa_cst(optree.get_value()), precision)
+
+        elif isinstance(optree, Conversion):
+            if optree.get_rounding_mode() is not None:
+              local_implementation = RoundOperator(optree.get_precision(), direction = optree.get_rounding_mode())
+            else:
+              local_implementation = RoundOperator(optree.get_precision())
+            return local_implementation.generate_expr(self, code_object, optree, optree.inputs, folded = folded, result_var = result_var)
+            
 
         elif isinstance(optree, TableLoad):
             # declaring table
@@ -214,6 +230,8 @@ class GappaCodeGenerator:
             code_object << self.generate_assignation(final_var, result.get())
             return CodeVariable(final_var, optree.get_precision())
 
+        if strip_outer_parenthesis and isinstance(result, CodeExpression):
+          result.strip_outer_parenthesis()
         return result
 
 
@@ -272,7 +290,7 @@ class GappaCodeGenerator:
         return execute_gappa_script_extract(gappa_code.get(self), gappa_filename = gappa_filename)["goal"]
 
 
-    def get_eval_error_v2(self, opt_engine, pre_optree, variable_copy_map = {}, goal_precision = ML_Exact, gappa_filename = "gappa_tmp.g"):
+    def get_eval_error_v2(self, opt_engine, pre_optree, variable_copy_map = {}, goal_precision = ML_Exact, gappa_filename = "gappa_tmp.g", relative_error = False):
         """ helper to compute the evaluation error of <pre_optree> bounded by tagged-node in variable_map, 
             assuming variable_map[v] is the liverange of node v """
         # registering initial bounds
@@ -297,6 +315,7 @@ class GappaCodeGenerator:
                 self.add_hypothesis(gappa_code, exact_var, variable_copy_map[v].get_interval())
                 sub_var = var - exact_var
                 sub_var.set_precision(ML_Exact)
+
                 self.add_hypothesis(gappa_code, sub_var, var_error_interval)
 
         pre_exact_optree = pre_optree.copy(var_error_copy_map)
@@ -308,14 +327,23 @@ class GappaCodeGenerator:
         #print "gappa_code: ", gappa_code.get(self)
         gappa_result_approx = self.generate_expr(gappa_code, optree, initial = False)
         #print "gappa_code: ", gappa_code.get(self)
-        goal = gappa_result_approx.get_variable(gappa_code) - gappa_result_exact.get_variable(gappa_code)
+        # Gappa Result Approx variable
+        gra_var = gappa_result_approx.get_variable(gappa_code)
+        # Gappa Result Exact variable
+        gre_var = gappa_result_exact.get_variable(gappa_code)
+        goal_diff = gra_var - gre_var 
+        goal_diff.set_attributes(precision = goal_precision, tag = "goal_diff")
+        if relative_error:
+          goal = goal_diff / gre_var
+        else:
+          goal = goal_diff
         goal.set_attributes(precision = goal_precision, tag = "goal")
         self.add_goal(gappa_code, goal)
 
         self.clear_memoization_map()
         return execute_gappa_script_extract(gappa_code.get(self), gappa_filename = gappa_filename)["goal"]
 
-    def get_eval_error_v3(self, opt_engine, pre_optree, variable_copy_map = {}, goal_precision = ML_Exact, gappa_filename = "gappa_tmp.g", dichotomy = []):
+    def get_eval_error_v3(self, opt_engine, pre_optree, variable_copy_map = {}, goal_precision = ML_Exact, gappa_filename = "gappa_tmp.g", dichotomy = [], relative_error = False):
         # storing initial interval values
         init_interval = {}
         for op in variable_copy_map:
@@ -337,7 +365,7 @@ class GappaCodeGenerator:
                     clean_copy_map[op].set_interval(init_interval[op])
                     
             # computing evaluation error in local conditions
-            eval_error = self.get_eval_error_v2(opt_engine, pre_optree, clean_copy_map, goal_precision, ("c%d_" % case_id) + gappa_filename )
+            eval_error = self.get_eval_error_v2(opt_engine, pre_optree, clean_copy_map, goal_precision, ("c%d_" % case_id) + gappa_filename, relative_error = relative_error)
             eval_error_list.append(eval_error)
             case_id += 1
 
@@ -351,8 +379,8 @@ class GappaCodeGenerator:
         # copying pre-operation tree
         goal = pre_goal.copy(variable_copy_map)
         goal.set_attributes(precision = goal_precision, tag = "goal")
-        #print "goal: "
-        #print goal.get_str(depth = 3, display_precision = True)
+        print "goal: "
+        print goal.get_str(depth = 3, display_precision = True)
 
         # updating handle
         if update_handle:
@@ -370,6 +398,19 @@ class GappaCodeGenerator:
         return gappa_code
 
 
+    def get_interval_code_no_copy(self, goal, goal_precision = ML_Exact, update_handle = True, bound_list = []):
+
+        # copying pre-operation tree
+        goal.set_attributes(precision = goal_precision, tag = "goal")
+
+        gappa_code = GappaCodeObject()
+
+        #gappa_result_approx = self.generate_expr(gappa_code, goal, initial = False, exact = False)
+        self.add_goal(gappa_code, goal)
+        for v in bound_list:
+            self.add_hypothesis(gappa_code, v, v.get_interval())
+
+        return gappa_code
 
 
 

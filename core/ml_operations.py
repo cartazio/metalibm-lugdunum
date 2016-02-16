@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+## @package ml_operations
+#  Metalibm Description Language basic Operation 
+
 ###############################################################################
 # This file is part of Kalray's Metalibm tool
 # Copyright (2013)
@@ -10,19 +13,23 @@
 # author(s): Nicolas Brunie (nicolas.brunie@kalray.eu)
 ###############################################################################
 
+
 import sys, inspect
 
 from pythonsollya import Interval, SollyaObject, PSI_is_range, nearestint
 
 from ..utility.log_report import Log
-from ..utility.common import Callable
+from ..utility.common import Callable, ML_NotImplemented
 from .attributes import Attributes, attr_init
 from .ml_formats import * # FP_SpecialValue, ML_FloatingPointException, ML_FloatingPoint_RoundingMode, ML_FPRM_Type, ML_FPE_Type
 
+## \defgroup ml_operations ml_operations
+#  @{
 
+
+## merge abstract format function
+#  @return most generic abstract format to unify args formats 
 def std_merge_abstract_format(*args):
-    """ return the most generic abstract format
-        to unify args formats """
     has_float = False
     has_integer = False
     has_bool = False
@@ -38,13 +45,17 @@ def std_merge_abstract_format(*args):
         Log.report(Log.Error, "unknown formats while merging abstract format tuple")
 
 
+## parent to Metalibm's operation 
+#  @brief Every operation class must inherit from this class
 class ML_Operation(object):
-    """ parent to Metalibm's operation """
     pass
 
 
+## implicit operation conversion (from number to Constant when required) 
+#  @brief This function is called on every operations arguments
+#         to legalize them
 def implicit_op(op):
-    """ implicit operation conversion (from number to Constant when required) """
+
     if isinstance(op, ML_Operation):
         return op
     elif isinstance(op, SollyaObject) or isinstance(op, int) or isinstance(op, float) or isinstance(op, FP_SpecialValue):
@@ -54,48 +65,61 @@ def implicit_op(op):
     elif isinstance(op, ML_FloatingPoint_RoundingMode):
         return Constant(op, precision = ML_FPRM_Type)
     else:
-        print "ERROR: unsupport operand in implicit_op conversion ", op, op.__class__
+        print "ERROR: unsupported operand in implicit_op conversion ", op, op.__class__
         raise Exception()
 
 
+## Parent for abstract operations 
+#  @brief parent to Metalibm's abstrat operation 
 class AbstractOperation(ML_Operation):
-    """ parent to Metalibm's abstrat operation """
     name = "AbstractOperation"
     extra_inputs = []
     global_index = 0
     str_del = "| "
 
+    ## init operation handle
     def __init__(self, **init_map):
-        # init operation handle
         self.attributes = Attributes(**init_map)
         self.index = AbstractOperation.global_index; AbstractOperation.global_index += 1
         self.get_handle().set_node(self)
 
+    ## extract the High part of the Node
     @property
     def hi(self):
         return ComponentSelection(self, specifier = ComponentSelection.Hi)
 
+    ## extract the Low part of the Node
     @property
     def lo(self):
         return ComponentSelection(self, specifier = ComponentSelection.Lo)
 
+    def __getitem__(self, index):
+        return VectorElementSelection(self, index)
+    def __setitem__(self, index, value):
+        return ReferenceAssign(VectorElementSelection(self, index), value, precision = value.get_precision())
 
+
+    ## Operator for boolean negation of operands 
     def __not__(self):
         return LogicalNot(self)
 
+    ## Operator for boolean AND of operands 
     def __and__(self, op):
         return LogicalAnd(self, op)
 
+    ## Operator for boolean OR of operands 
     def __or__(self, op):
         return LogicalOr(self, op)
 
+    ## Unary operator for arithmetic negation 
     def __neg__(self):
         return Negation(self)
 
+    ## implicit add operation between AbstractOperation 
     def __add__(self, op):
-        """ implicit add operation between AbstractOperation """
         return Addition(self, implicit_op(op))
 
+    ## 2-Operand operator for arithmetic power 
     def __pow__(self, n):
         if n == 0: return Constant(1, precision = self.get_precision())
         elif n == 1: return self
@@ -106,139 +130,186 @@ class AbstractOperation(ML_Operation):
           else:
             return tmp * tmp
 
+    ## 2-Operand implicit subtraction operator
     def __sub__(self, op):
         """ implicit add operation between AbstractOperation """
         return Subtraction(self, implicit_op(op))
 
+    ## 2-Operand implicit commuted addition operator
     def __radd__(self, op):
         """ implicit reflexive add operation between AbstractOperation """
         return Addition(implicit_op(op), self)
 
+    ## 2-Operand implicit multiplication operator
     def __mul__(self, op):
         """ implicit multiply operation between AbstractOperation """
         return Multiplication(self, implicit_op(op))
 
+    ## 2-Operand implicit commuted subtraction operator
     def __rsub__(self, op):
+        """ Commutation operator for 2-operand subtraction """
         return Subtraction(implicit_op(op), self)
 
+    ## 2-Operand implicit commuted multiplication operator
     def __rmul__(self, op):
         """ implicit reflexive multiply operation between AbstractOperation """
         return Multiplication(implicit_op(op), self)
 
+    ## 2-Operand implicit division operator
     def __div__(self, op):
         """ implicit division operation between AbstractOperation """
         return Division(self, implicit_op(op))
         
+    ## 2-Operand implicit commuted division operator
     def __rdiv__(self, op):
         """ implicit reflexive division operation between AbstractOperation """
         return Division(implicit_op(op), self)
         
+    ## 2-Operand implicit modulo operator
     def __mod__(self, op):
         """ implicit modulo operation between AbstractOperation """
         return Modulo(self, implicit_op(op))
         
+    ## 2-Operand implicit commuted modulo operator
     def __rmod__(self, op):
         """ implicit reflexive modulo operation between AbstractOperation """
         return Modulo(self, implicit_op(op))
 
+    ## implicit less than operation "
     def __lt__(self, op):
-        """ implicit less than operation """
         return Comparison(self, implicit_op(op), specifier = Comparison.Less)
 
+    ## implicit less or equal operation
     def __le__(self, op):
-        """ implicit less or egual operation """
         return Comparison(self, implicit_op(op), specifier = Comparison.LessOrEqual)
 
+    ## implicit greater or equal operation 
     def __ge__(self, op):
-        """ implicit greater or equal operation """
         return Comparison(self, implicit_op(op), specifier = Comparison.GreaterOrEqual)
 
+    ## implicit greater than operation
     def __gt__(self, op):
-        """ implciit greater than operation """
         return Comparison(self, implicit_op(op), specifier = Comparison.Greater)
 
+    ## precision getter
+    #  @return the node output precision
     def get_precision(self):
-        """ precision getter (transmit to self.attributes field) """
         return self.attributes.get_precision()
+
+    ## set the node output precision
     def set_precision(self, new_precision):
-        """ precision setter (transmit to self.attributes field) """
         self.attributes.set_precision(new_precision)
 
+
+    def get_inputs(self):
+        return self.inputs
+
+    def get_input(self, index):
+        return self.inputs[index]
+
+    ##
+    #  @return the node evaluated live-range (when available) 
     def get_interval(self):
-        """ interval getter (transmit to self.attributes field) """
         return self.attributes.get_interval()
+    ## set the node live-range interval
     def set_interval(self, new_interval):
-        """ interval setter (transmit to self.attributes field) """
         return self.attributes.set_interval(new_interval)
 
+    ## wrapper for getting the exact field of node's attributes
+    #  @return the node exact flag value
     def get_exact(self):
-        """ exact attribute getter (transmit to self.attributes field) """
         return self.attributes.get_exact()
 
+    ## wrapper for setting the exact field of node's attributes
     def set_exact(self, new_exact_value):
-        """ exact attribute setter (transmit to self.attributes field) """
         self.attributes.set_exact(new_exact_value)
 
+    ## wrapper for getting the tag value within node's attributes
+    #  @return the node's tag 
     def get_tag(self, default = None):
         """ tag getter (transmit to self.attributes field) """
         op_tag = self.attributes.get_tag()
         return default if op_tag == None else op_tag
 
+    ## wrapper for setting the tag value within node's attributes
     def set_tag(self, new_tag):
         """ tag setter (transmit to self.attributes field) """
         return self.attributes.set_tag(new_tag)
 
+    ## wrapper for getting the value of debug field from node's attributes
     def get_debug(self):
-        """ debug getter (transmit to self.attributes field) """
         return self.attributes.get_debug()
+    ## wrapper for setting the debug field value within node's attributes
     def set_debug(self, new_debug):
-        """ debug setter (transmit to self.attributes field) """
         return self.attributes.set_debug(new_debug)
 
+    ## wrapper for getting the value of silent field from node's attributes
     def get_silent(self):
+    ## wrapper for setting the value of silent field within node's attributes
         return self.attributes.get_silent()
     def set_silent(self, silent_value):
         return self.attributes.set_silent(silent_value)
 
+    ## wrapper for retrieving the handle field from node's attributes
     def get_handle(self):
         return self.attributes.get_handle()
+    ## wrapper for changing the handle within node's attributes
     def set_handle(self, new_handle):
         self.attributes.set_handle(new_handle)
 
+    ##  wrapper for getting the value of clearprevious field from node's attributes
     def get_clearprevious(self):
         return self.attributes.get_clearprevious()
+    ## wrapper for setting the value of clearprevious field within node's attributes
     def set_clearprevious(self, new_clearprevious):
         return self.attributes.set_clearprevious(new_clearprevious)
 
+    ##  wrapper for getting the value of unbreakable field from node's attributes
     def get_unbreakable(self):
         return self.attributes.get_unbreakable()
+    ## wrapper for setting the value of unbreakable field within node's attributes
     def set_unbreakable(self, new_unbreakable):
         return self.attributes.set_unbreakable(new_unbreakable)
 
+    ## wrapper to change some attributes values using dictionnary arguments
     def set_attributes(self, **kwords):
+        if "likely" in kwords:
+            self.set_likely(kwords["likely"])
+            kwords.pop("likely")
         self.attributes.set_attr(**kwords)
 
+    ## modify the values of some node's attributes and return the current node
+    #  @return current node
     def modify_attributes(self, **kwords):
         self.attributes.set_attr(**kwords)
         return self
 
+    ## 
+    #  @return the node index
     def get_index(self):
         """ index getter function """
         return self.index
+    ## set the node's index value
+    #  
     def set_index(self, new_index):
         """ index setter function """
         self.index = new_index 
 
+    ## wrapper for getting the rounding_mode field from node's attributes
+    #  @return the node rounding mode field
     def get_rounding_mode(self):
         """ rounding mode getter function (attributes)"""
         return self.attributes.get_rounding_mode()
+    ## wrapper for setting the rounding field within node's attributes
     def set_rounding_mode(self, new_rounding_mode):
         """ rounding mode setter function (attributes) """
         self.attributes.set_rounding_mode(new_rounding_mode)
 
-
+    ## wrapper for getting the max_abs_error field of node's attributes
+    #  @return the node's max_abs_error attribute value
     def get_max_abs_error(self):
         return self.attributes.get_max_abs_error()
+    ## wrapper for setting the max_abs_error field value within node's attributes
     def set_max_abs_error(self, new_max_abs_error):
         self.attributes.set_max_abs_error(new_max_abs_error)
 
@@ -247,14 +318,20 @@ class AbstractOperation(ML_Operation):
     def set_prevent_optimization(self, prevent_optimization):
         self.attributes.set_prevent_optimization(prevent_optimization)
 
+    ## wrapper to access the class name field
+    #  @return the node's name (generally node's class name)
     def get_name(self):
         """ return operation name (by default class name) """
         return self.name
 
+    ##
+    #  @return the list of node's extra inputs
     def get_extra_inputs(self):
         """ return list of non-standard inputs """
         return self.extra_inputs
 
+    ## change the node to mirror optree
+    # by copying class, attributes, arity and inputs from optree to self
     def change_to(self, optree):
         """ change <self> operation to match optree """
         self.__class__ = optree.__class__
@@ -265,11 +342,15 @@ class AbstractOperation(ML_Operation):
             self.specifier = optree.specifier
 
 
+    ## string conversion 
+    #  @param  depth [integer/None] node depth where the display recursion stops
+    #  @param  display_precision [boolean] enable/display node's precision display
+    #  @param  tab_level number of tab to be inserted left to node's description
+    #  @param  memoization_map [dict] hastable to store previously described node (already generated node tag will be use rather than copying the full description)
+    #  @param  display_attribute [boolean] enable/disable display of node's attributes
+    #  @param  display_id [boolean]  enable/disbale display of unique node identified
+    #  @return a string describing the node
     def get_str(self, depth = 2, display_precision = False, tab_level = 0, memoization_map = {}, display_attribute = False, display_id = False):
-        """ string conversion for operation graph 
-            depth:                  number of level to be crossed (None: infty)
-            display_precision:      enable/display format display
-        """
         new_depth = None 
         if depth != None:
             if  depth < 0: 
@@ -278,6 +359,7 @@ class AbstractOperation(ML_Operation):
             
         tab_str = AbstractOperation.str_del * tab_level
         silent_str = "[S]" if self.get_silent() else ""
+        dbg_str = "[DBG]" if self.get_debug() else ""
         id_str     = ("[id=%x]" % id(self)) if display_id else ""
         attribute_str = "" if not display_attribute else self.attributes.get_str(tab_level = tab_level)
         if self in memoization_map:
@@ -286,28 +368,52 @@ class AbstractOperation(ML_Operation):
         if self.arity == 1:
             precision_str = "" if not display_precision else "[%s]" % str(self.get_precision())
             memoization_map[self] = str_tag
-            return tab_str + "%s%s%s%s%s -------> %s\n%s" % (self.get_name(), precision_str, silent_str, id_str, attribute_str, str_tag, "".join(inp.get_str(new_depth, display_precision, tab_level = tab_level + 1, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id) for inp in self.inputs))
+            return tab_str + "%s%s%s%s%s%s -------> %s\n%s" % (self.get_name(), precision_str, dbg_str, silent_str, id_str, attribute_str, str_tag, "".join(inp.get_str(new_depth, display_precision, tab_level = tab_level + 1, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id) for inp in self.inputs))
         else:
             memoization_map[self] = str_tag
             precision_str = "" if not display_precision else "[%s]" % str(self.get_precision())
-            return tab_str + "%s%s%s%s%s ------> %s\n%s" % (self.get_name(), precision_str, silent_str, id_str, attribute_str, str_tag, "".join(inp.get_str(new_depth, display_precision, tab_level = tab_level + 1, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id) for inp in self.inputs))
+            return tab_str + "%s%s%s%s%s%s ------> %s\n%s" % (self.get_name(), precision_str, dbg_str, silent_str, id_str, attribute_str, str_tag, "".join(inp.get_str(new_depth, display_precision, tab_level = tab_level + 1, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id) for inp in self.inputs))
 
 
+    ## virtual function, called after a node's copy
+    #  overleaded by inheriter of AbstractOperation
     def finish_copy(self, new_copy, copy_map = {}):
         pass
 
 
+    ## pure virtual copy  node function
+    #  @param copy_map dictionnary of previously built copy, if a node is found within this table, table's value is returned as copy result
+    #  @return node's copy (newly generated or memoized)
+    def copy(self, copy_map = {}):
+        print "Error: copy not implemented"
+        print self, self.__class__
+        raise ML_NotImplemented()
+
+    ## propagate given precision
+    #  @param precision
+    #  @return None
+    def propagate_precision(self, precision, boundary_list = []):
+      self.set_precision(precision)
+      if not isinstance(self, ML_LeafNode):
+        for op in self.inputs:
+          if op.get_precision() is None and not op in boundary_list: 
+            op.propagate_precision(precision, boundary_list)
+
+
+## base class for all arithmetic operation that may depend
+#  on floating-point context (rounding mode for example) 
 class ML_ArithmeticOperation(AbstractOperation):
-    """ base class for all arithmetic operation that may depend
-        on floating-point context (rounding mode for example) """
     pass
 
+## Parent for AbstractOperation with no expected input
 class ML_LeafNode(AbstractOperation): 
-    """ AbstractOperation with no expected input """
     pass
 
+## Constant node class
 class Constant(ML_LeafNode):
-    """ Constant operation class """
+    ## Initializer
+    #  @param value numerical value of the constant
+    #  @param init_map dictionnary for attributes initialization
     def __init__(self, value, **init_map):
         # value initialization
         AbstractOperation.__init__(self, **init_map)
@@ -317,8 +423,12 @@ class Constant(ML_LeafNode):
             self.attributes.set_interval(Interval(value))
 
 
+    ## accessor to the constat value
+    #  @return the numerical constant value
     def get_value(self):
         return self.value
+    def set_value(self, new_value):
+        self.value = new_value
 
     def get_str(self, depth = None, display_precision = False, tab_level = 0, memoization_map = {}, display_attribute = False, display_id = False):
         precision_str = "" if not display_precision else "[%s]" % str(self.get_precision())
@@ -338,12 +448,22 @@ class Constant(ML_LeafNode):
         return new_copy
 
 
+## class for Variable node, which contains a temporary state of the operation DAG
+##  which may have been defined outside the scope of the implementation (input variable)
 class Variable(ML_LeafNode):
-    """ class to hold an (input) Variable, defined outside the scope
-        of the program """
+    ## Input type for Variable Node
+    #  such node is not defined as an input to the function description
     class Input: pass
+    class Local: pass
+
+    ## Intermediary type for Variable Node
+    #  such node is defined within the function description.
+    #  It holds an intermediary state
     class Intermediary: pass
-    """ Variable operator class """
+
+    ## constructor
+    #  @param tag string name of the Variable object
+    #  @param init_map standard ML_Operation attribute dictionnary initialization 
     def __init__(self, tag, **init_map):
         AbstractOperation.__init__(self, **init_map)
         self.attributes.set_tag(tag)
@@ -351,9 +471,11 @@ class Variable(ML_LeafNode):
         # and intermediary variables 
         self.var_type = attr_init(init_map, "var_type", default_value = Variable.Input)  
 
+    ## @return the type (Input or Intermediary0 of the Variable node
     def get_var_type(self):
         return self.var_type
 
+    ## generate string description of the Variable node
     def get_str(self, depth = None, display_precision = False, tab_level = 0, memoization_map = {}, display_attribute = False, display_id = False):
         precision_str = "" if not display_precision else "[%s]" % str(self.get_precision())
         attribute_str = "" if not display_attribute else self.attributes.get_str(tab_level = tab_level)
@@ -464,25 +586,25 @@ def ArithmeticOperationConstructor(name, arity = 2, range_function = None, error
     return GeneralOperationConstructor(name, arity = arity, range_function = range_function, error_function = error_function, inheritance = inheritance, base_class = ML_ArithmeticOperation)
 
 
-class BitLogicAnd(AbstractOperationConstructor("BitLogicAnd")):
+class BitLogicAnd(ArithmeticOperationConstructor("BitLogicAnd")):
     pass
-class BitLogicOr(AbstractOperationConstructor("BitLogicOr")):
+class BitLogicOr(ArithmeticOperationConstructor("BitLogicOr")):
     pass
-class BitLogicXor(AbstractOperationConstructor("BitLogicXor")):
+class BitLogicXor(ArithmeticOperationConstructor("BitLogicXor")):
     pass
-class BitLogicNegate(AbstractOperationConstructor("BitLogicNegate", arity = 1)):
+class BitLogicNegate(ArithmeticOperationConstructor("BitLogicNegate", arity = 1)):
     pass
-class BitLogicRightShift(AbstractOperationConstructor("BitLogicRightShift", arity = 2)):
+class BitLogicRightShift(ArithmeticOperationConstructor("BitLogicRightShift", arity = 2)):
     pass
-class BitLogicLeftShift(AbstractOperationConstructor("BitLogicLeftShift", arity = 2)):
+class BitLogicLeftShift(ArithmeticOperationConstructor("BitLogicLeftShift", arity = 2)):
     pass
 
 
-class Abs(AbstractOperationConstructor("Abs", range_function = lambda self, ops: abs(ops[0]))):
+class Abs(ArithmeticOperationConstructor("Abs", range_function = lambda self, ops: abs(ops[0]))):
     """ abstract absolute value operation """
     pass
 
-class Negation(AbstractOperationConstructor("Negation", range_function = lambda self, ops: - ops[0])): 
+class Negation(ArithmeticOperationConstructor("Negation", range_function = lambda self, ops: - ops[0])): 
     """ abstract negation """
     pass
 
@@ -490,7 +612,7 @@ class Addition(ArithmeticOperationConstructor("Addition", range_function = lambd
     """ abstract addition """
     pass
 
-class Negate(AbstractOperationConstructor("Negate", range_function = lambda self, ops: -ops[0])): 
+class Negate(ArithmeticOperationConstructor("Negate", range_function = lambda self, ops: -ops[0])): 
     """ abstract negation """
     pass
 
@@ -502,9 +624,9 @@ class SpecifierOperation:
 
 class ComponentSelectionSpecifier: pass
 
-class Split(AbstractOperationConstructor("Split", arity = 1)):
+class Split(ArithmeticOperationConstructor("Split", arity = 1)):
     pass
-class ComponentSelection(AbstractOperationConstructor("ComponentSelection", inheritance = [SpecifierOperation], arity = 1)):
+class ComponentSelection(ArithmeticOperationConstructor("ComponentSelection", inheritance = [SpecifierOperation], arity = 1)):
     class Hi(ComponentSelectionSpecifier): pass
     class Lo(ComponentSelectionSpecifier): pass
 
@@ -612,7 +734,7 @@ class Division(ArithmeticOperationConstructor("Division", range_function = lambd
     pass
 
 
-class Modulo(AbstractOperationConstructor("Modulo", range_function = lambda self, ops: ops[0] % ops[1])):
+class Modulo(ArithmeticOperationConstructor("Modulo", range_function = lambda self, ops: ops[0] % ops[1])):
     """ abstract modulo operation """
     pass
 
@@ -622,7 +744,7 @@ class NearestInteger(ArithmeticOperationConstructor("NearestInteger", arity = 1,
     pass
 
 
-class PowerOf2(AbstractOperationConstructor("PowerOf2", arity = 1, range_function = lambda self, ops: S2**ops[0])):
+class PowerOf2(ArithmeticOperationConstructor("PowerOf2", arity = 1, range_function = lambda self, ops: S2**ops[0])):
     """ abstract power of 2 operation """
     pass
 
@@ -630,7 +752,7 @@ class Return(AbstractOperationConstructor("Return", arity = 1, range_function = 
     """ abstract return value operation """
     pass
 
-class TableLoad(AbstractOperationConstructor("TableLoad", arity = 2, range_function = lambda self, ops: None)):
+class TableLoad(ArithmeticOperationConstructor("TableLoad", arity = 2, range_function = lambda self, ops: None)):
     """ abstract load from a table operation """
     pass
 
@@ -638,7 +760,7 @@ class TableLoad(AbstractOperationConstructor("TableLoad", arity = 2, range_funct
 def interval_union(int0, int1):
     return Interval(min(inf(int0), inf(int1)), max(sup(int0), sup(int1)))
 
-class Select(AbstractOperationConstructor("Select", arity = 3, range_function = lambda self, ops: interval_union(ops[1], ops[2]))):
+class Select(ArithmeticOperationConstructor("Select", arity = 3, range_function = lambda self, ops: interval_union(ops[1], ops[2]))):
     pass
 
 
@@ -647,6 +769,11 @@ def Max(op0, op1, **kwords):
 
 def Min(op0, op1, **kwords):
     return Select(Comparison(op0, op1, specifier = Comparison.Less), op0, op1, **kwords)
+
+class Loop(AbstractOperationConstructor("Loop", arity = 3)):
+  """ abstract loop constructor 
+      loop (init_statement, exit_condition, loop_body)
+  """
 
 
 class ConditionBlock(AbstractOperationConstructor("ConditionBlock", arity = 3)):
@@ -679,20 +806,20 @@ class ConditionBlock(AbstractOperationConstructor("ConditionBlock", arity = 3)):
         self.pre_statement.push(optree)
 
     def finish_copy(self, new_copy, copy_map = {}):
-        new_copy.pre_statement = self.statement.copy(copy_map)
+        new_copy.pre_statement = self.pre_statement.copy(copy_map)
         new_copy.extra_inputs = [op.copy(copy_map) for op in self.extra_inputs]
         new_copy.parent_list = [op.copy(copy_map) for op in self.parent_list] 
   
 
-class Conversion(AbstractOperationConstructor("Conversion", arity = 1)):
+class Conversion(ArithmeticOperationConstructor("Conversion", arity = 1)):
   """ abstract conversion operation """
   pass
 
-class TypeCast(AbstractOperationConstructor("TypeCast", arity = 1)):
+class TypeCast(ArithmeticOperationConstructor("TypeCast", arity = 1)):
   """ abstract conversion operation """
   pass
     
-class Dereference(AbstractOperationConstructor("Dereference", arity = 1)):
+class Dereference(ArithmeticOperationConstructor("Dereference", arity = 1)):
   """ abstract pointer derefence operation """
   pass
 
@@ -700,7 +827,7 @@ class ReferenceAssign(AbstractOperationConstructor("ReferenceAssign", arity = 1)
   """ abstract assignation to reference operation """
   pass
 
-class ExponentInsertion(AbstractOperationConstructor("ExponentInsertion", arity = 1, inheritance = [SpecifierOperation])):
+class ExponentInsertion(ArithmeticOperationConstructor("ExponentInsertion", arity = 1, inheritance = [SpecifierOperation])):
   """ insertion of a number in the exponent field of a floating-point value """ 
   class Default: pass
   class NoOffset: pass
@@ -713,21 +840,18 @@ class ExponentInsertion(AbstractOperationConstructor("ExponentInsertion", arity 
     """ return code generation specific key """
     return self.specifier
 
-class MantissaExtraction(AbstractOperationConstructor("MantissaExtraction", arity = 1)):
+class MantissaExtraction(ArithmeticOperationConstructor("MantissaExtraction", arity = 1)):
   """ extraction of the mantissa field of a floating-point value """
   pass
 
-class ExponentExtraction(AbstractOperationConstructor("ExponentExtraction", arity = 1)):
+class ExponentExtraction(ArithmeticOperationConstructor("ExponentExtraction", arity = 1)):
   """ extraction of the exponent field of a floating-point value """
   pass
 
-class RawSignExpExtraction(AbstractOperationConstructor("RawSignExpExtraction", arity = 1)):
+class RawSignExpExtraction(ArithmeticOperationConstructor("RawSignExpExtraction", arity = 1)):
     pass
 
-class RawMantissaExtraction(AbstractOperationConstructor("RawMantissaExtraction", arity = 1)):
-    pass
-
-class CountLeadingZeros(AbstractOperationConstructor("CountLeadingZeros", arity = 1)):
+class CountLeadingZeros(ArithmeticOperationConstructor("CountLeadingZeros", arity = 1)):
     pass
 
 class TestSpecifier(object): 
@@ -763,6 +887,7 @@ class BooleanOperation:
     def finish_copy(self, new_copy, copy_map = {}):
         new_copy.likely = self.likely
 
+
 def logic_operation_init(self, *args, **kwords):
     self.__class__.__base__.__init__(self, *args, **kwords)
     BooleanOperation.__init__(self, attr_init(kwords, "likely"))
@@ -776,7 +901,7 @@ def LogicOperationBuilder(op_name, arity = 2, likely_function = lambda self, *op
         "__init__": logic_operation_init,
         "likely_function": likely_function,
     }
-    return type(op_name, (AbstractOperationConstructor(op_name, inheritance = [BooleanOperation]),), field_map)
+    return type(op_name, (ArithmeticOperationConstructor(op_name, inheritance = [BooleanOperation]),), field_map)
 
 
 
@@ -786,7 +911,7 @@ LogicalNot = LogicOperationBuilder("LogicalNot", arity = 1, likely_function = la
 
         
 
-class Test(AbstractOperationConstructor("Test", inheritance = [BooleanOperation, SpecifierOperation])):
+class Test(ArithmeticOperationConstructor("Test", inheritance = [BooleanOperation, SpecifierOperation])):
     """ Abstract Test operation class """
     class IsNaN(TestSpecifier_Builder("IsNaN", 1)): pass
     class IsQuietNaN(TestSpecifier_Builder("IsQuietNaN", 1)): pass
@@ -794,6 +919,7 @@ class Test(AbstractOperationConstructor("Test", inheritance = [BooleanOperation,
     class IsInfty(TestSpecifier_Builder("IsInfty", 1)): pass
     class IsPositiveInfty(TestSpecifier_Builder("IsPositiveInfty", 1)): pass
     class IsNegativeInfty(TestSpecifier_Builder("IsNegativeInfty", 1)): pass
+    class IsIEEENormalPositive(TestSpecifier_Builder("IsIEEENormalPositive", 1)): pass
     class IsInfOrNaN(TestSpecifier_Builder("IsInfOrNaN", 1)): pass
     class IsZero(TestSpecifier_Builder("IsZero", 1)): pass
     class IsPositiveZero(TestSpecifier_Builder("IsPositiveZero", 1)): pass
@@ -802,12 +928,16 @@ class Test(AbstractOperationConstructor("Test", inheritance = [BooleanOperation,
     class CompSign(TestSpecifier_Builder("CompSign", 2)): pass
     class SpecialCases(TestSpecifier_Builder("SpecialCases", 1)): pass
     class IsInvalidInput(TestSpecifier_Builder("IsInvalidInput", 1)): pass
+    class IsMaskAllZero(TestSpecifier_Builder("IsMaskAllZero", 1)): pass
+    class IsMaskNotAllZero(TestSpecifier_Builder("IsMaskNotAllZero", 1)): pass
+    class IsMaskAnyZero(TestSpecifier_Builder("IsMaskAnyZero", 1)): pass
+    class IsMaskNotAnyZero(TestSpecifier_Builder("IsMaskNotAnyZero", 1)): pass
 
     def __init__(self, *args, **kwords):
         self.__class__.__base__.__init__(self, *args, **kwords)
         BooleanOperation.__init__(self, attr_init(kwords, "likely"))
         self.specifier = attr_init(kwords, "specifier", required = True)
-        self.arity = self.specifier.arity
+        self.arity = self.specifier.arity if not self.specifier is None else 1
 
 
     def get_name(self):
@@ -824,15 +954,26 @@ class Test(AbstractOperationConstructor("Test", inheritance = [BooleanOperation,
         BooleanOperation.finish_copy(self, new_copy, copy_map)
         new_copy.arity = self.arity
 
+class ComparisonSpecifier(object): pass
+def CompSpecBuilder(name, opcode):
+    field_map = {
+        # operation copy
+        "opcode": opcode,
+        # operation name
+        "get_opcode": (lambda self: self.opcode),
+    }
+    return type(name, (ComparisonSpecifier,), field_map)
 
-class Comparison(AbstractOperationConstructor("Comparison", arity = 2, inheritance = [BooleanOperation, SpecifierOperation])):
+  
+
+class Comparison(ArithmeticOperationConstructor("Comparison", arity = 2, inheritance = [BooleanOperation, SpecifierOperation])):
     """ Abstract Comparison operation """
-    class Equal: pass
-    class Less: pass
-    class LessOrEqual: pass
-    class Greater: pass
-    class GreaterOrEqual: pass
-    class NotEqual: pass
+    Equal          = CompSpecBuilder("Equal", "eq")
+    NotEqual       = CompSpecBuilder("NotEqual", "ne")
+    Less           = CompSpecBuilder("Less",  "lt")
+    LessOrEqual    = CompSpecBuilder("LessOrEqual", "le")
+    Greater        = CompSpecBuilder("Greater", "gt")
+    GreaterOrEqual = CompSpecBuilder("GreaterOrEqual", "ge")
 
 
     def __init__(self, *args, **kwords):
@@ -871,12 +1012,14 @@ class Statement(AbstractOperationConstructor("Statement")):
         self.arity = len(args)
 
 
+    # add a new statement at the end of the inputs list 
+    # @param optree ML_Operation object added at the end of inputs list
     def add(self, optree):
-        """ add a new unary statement at the end of the input list """
         self.inputs = self.inputs + (optree,)
         self.arity += 1
 
-
+    # push a new statement at the end of the inputs list 
+    # @param optree ML_Operation object added at the end of inputs list
     def push(self, optree):
         """ add a new unary statement at the beginning of the input list """
         self.inputs = (optree,) + self.inputs
@@ -887,7 +1030,7 @@ class Statement(AbstractOperationConstructor("Statement")):
         new_copy.arity = self.arity
 
 
-class FieldExtraction(AbstractOperationConstructor("FieldExtraction")):
+class FieldExtraction(ArithmeticOperationConstructor("FieldExtraction")):
     def __init__(self, *args, **kwords):
         self.__class__.__base__.__init__(self, *args, **kwords)
         self.arity = len(args)
@@ -1156,6 +1299,62 @@ class SwitchBlock(AbstractOperationConstructor("Switch", arity = 1)):
                 pre_str += "Case: %s" %  case_str #.get_str(new_depth, display_precision, tab_level = 0, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id)
                 pre_str += "%s" %  self.case_map[case].get_str(new_depth, display_precision, tab_level = tab_level + 2, memoization_map = memoization_map, display_attribute = display_attribute, display_id = display_id)
             return pre_str
+
+class VectorElementSelection(ArithmeticOperationConstructor("VectorElementSelection", arity = 2)):
+    implicit_arg_precision = {
+        ML_Float2: ML_Binary32,
+        ML_Float4: ML_Binary32,
+        ML_Float8: ML_Binary32,
+
+        ML_Double2: ML_Binary64,
+        ML_Double4: ML_Binary64,
+        ML_Double8: ML_Binary64,
+
+        ML_Int2: ML_Int32,
+        ML_Int4: ML_Int32,
+        ML_Int8: ML_Int32,
+
+        ML_UInt2: ML_UInt32,
+        ML_UInt4: ML_UInt32,
+        ML_UInt8: ML_UInt32,
+    }
+
+    def get_codegen_key(self):
+        """ return code generation specific key """
+        return None
+
+    def __init__(self, vector, elt_index, **kwords):
+        self.__class__.__base__.__init__(self, vector, elt_index, **kwords)
+        self.elt_index = elt_index
+
+        # setting implicit precision
+        if self.get_precision() == None and  vector.get_precision() != None:
+            arg_precision = vector.get_precision()
+            if arg_precision in VectorElementSelection.implicit_arg_precision:
+                self.set_precision(VectorElementSelection.implicit_arg_precision[arg_precision])
+
+    def get_elt_index(self):
+        return self.elt_index
+
+
+def AdditionN(*args, **kwords):
+  """ multiple-operand addition wrapper """
+  op_list = [op for op in args]
+  while len(op_list) > 1:
+    op0 = op_list.pop(0)
+    op1 = op_list.pop(0)
+    op_list.append(Addition(op0, op1, **kwords))
+  return op_list[0]
+
+
+def Likely(optree, likely_value):
+  optree.get_likely = lambda: likely_value
+  return optree
+
+# end of doxygen group ml_operations
+## @}
+
+
 
 if __name__ == "__main__":
   # auto doc

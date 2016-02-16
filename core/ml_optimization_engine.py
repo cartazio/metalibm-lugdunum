@@ -28,8 +28,9 @@ def merge_abstract_format(*args):
 
     if has_float: return ML_Float
     if has_integer: return ML_Integer
-    if has_bool: return ML_Bool
+    if has_bool: return ML_AbstractBool
     else:
+        print [str(arg) for arg in args]
         Log.report(Log.Error, "unknown formats while merging abstract format tuple")
 
 
@@ -66,20 +67,18 @@ abstract_typing_rule = {
         lambda *ops: ML_Float,
     RawSignExpExtraction: 
         lambda *ops: ML_Integer,
-    RawMantissaExtraction: 
-        lambda *ops: ML_Integer,
     CountLeadingZeros: 
         lambda *ops: ML_Integer,
     Comparison: 
-        lambda *ops: ML_Bool,
+        lambda *ops: ML_AbstractBool,
     Test: 
-        lambda *ops: ML_Bool,
+        lambda *ops: ML_AbstractBool,
     LogicalAnd: 
-        lambda *ops: ML_Bool,
+        lambda *ops: ML_AbstractBool,
     LogicalOr: 
-        lambda *ops: ML_Bool,
+        lambda *ops: ML_AbstractBool,
     LogicalNot: 
-        lambda *ops: ML_Bool,
+        lambda *ops: ML_AbstractBool,
     BitLogicAnd:
         lambda *ops: ML_Integer,
     BitLogicOr:
@@ -136,8 +135,6 @@ practical_typing_rule = {
     MantissaExtraction: 
         lambda backend, op, dprec: backend.merge_abstract_format(op, op.inputs),
     RawSignExpExtraction:
-        lambda backend, op, dprec: backend.get_integer_format(op),
-    RawMantissaExtraction:
         lambda backend, op, dprec: backend.get_integer_format(op),
     CountLeadingZeros:
         lambda backend, op, dprec: backend.get_integer_format(op),
@@ -247,7 +244,7 @@ type_escalation = {
         },
     },
     ExponentInsertion: {
-        lambda result_type: True: {
+        lambda result_type: not isinstance(result_type, ML_VectorFormat) : {
             lambda op_type: isinstance(op_type, ML_FP_Format): 
                 lambda op: {32: ML_Int32, 64: ML_Int64}[op.get_precision().get_bit_size()],
             lambda op_type: isinstance(op_type, ML_Fixed_Format):
@@ -259,6 +256,18 @@ type_escalation = {
 
 # Table of transformation rule to translate an operation into its exact (no rounding error) counterpart
 exactify_rule = {
+    Constant: {
+      None: {
+        lambda optree, exact_format: optree.get_precision() is None: 
+          lambda opt_eng, optree, exact_format: opt_eng.swap_format(optree, exact_format),
+      },
+    },
+    Division: { 
+        None: {
+            lambda optree, exact_format: True: 
+                lambda opt_eng, optree, exact_format: opt_eng.swap_format(optree, exact_format),
+        },
+    },
     Addition: { 
         None: {
             lambda optree, exact_format: True: 
@@ -328,6 +337,12 @@ support_simplification = {
                 lambda optree, processor: Subtraction(Multiplication(optree.inputs[0], optree.inputs[1], precision = optree.get_precision()), Multiplication(optree.inputs[2], optree.inputs[3], precision = optree.get_precision()), precision = optree.get_precision()), 
         },
     },
+    Subtraction: {
+      None: {
+        lambda optree: True: 
+          lambda optree, processor: Addition(optree.inputs[0], Negate(optree.inputs[1], precision = optree.inputs[1].get_precision()), precision = optree.get_precision())
+      },
+    },
     SpecificOperation: {
         SpecificOperation.DivisionSeed: {
             lambda optree: True:
@@ -340,12 +355,13 @@ support_simplification = {
 
 class OptimizationEngine:
     """ backend (precision instanciation and optimization passes) class """
-    def __init__(self, processor, default_integer_format = ML_Int32, default_fp_precision = ML_Binary32, change_handle = True, dot_product_enabled = True):
+    def __init__(self, processor, default_integer_format = ML_Int32, default_fp_precision = ML_Binary32, change_handle = True, dot_product_enabled = True, default_boolean_precision = ML_Int32):
         self.processor = processor
         self.default_integer_format = default_integer_format
         self.default_fp_precision = default_fp_precision
         self.change_handle = change_handle
         self.dot_product_enabled = dot_product_enabled
+        self.default_boolean_precision = default_boolean_precision
 
     def set_dot_product_enabled(self, dot_product_enabled):
         self.dot_product_enabled = dot_product_enabled
@@ -382,7 +398,9 @@ class OptimizationEngine:
 
     def get_boolean_format(self, optree):
         """ return boolean format to use for optree """
-        return ML_Int32
+        return self.default_boolean_precision
+    def set_boolean_format(self, new_boolean_format):
+        self.default_boolean_precision = new_boolean_format
 
 
     def propagate_format_to_cst(self, optree, new_optree_format, index_list = []):
@@ -404,9 +422,9 @@ class OptimizationEngine:
             except:
                 print "ERROR in get_bit_size during merge_abstract_format"
                 print "optree: "
-                print optree.get_precision(), optree.get_str()
+                print optree.get_precision(), optree.get_str(display_precision = True, memoization_map = {}) # Exception print
                 print "arg: "
-                print arg.get_precision(), arg.get_str()
+                print arg.get_precision(), arg.get_str(display_precision = True, memoization_map = {}) # Exception print
 
                 raise Exception()
             if arg_bit_size > max_binary_size:
@@ -443,9 +461,17 @@ class OptimizationEngine:
                 32: ML_Int32,
                 64: ML_Int64,
             },
+            ML_AbstractBool: {
+              32: ML_Bool,
+  
+            }
         }
         
-        result_format = merge_table[merge_abstract_format(*args)][max_binary_size]
+        try:
+          result_format = merge_table[merge_abstract_format(*args)][max_binary_size]
+        except KeyError:
+          Log.report(Log.Info, "KeyError in merge_format")
+          return None
         return result_format
 
 
@@ -468,14 +494,17 @@ class OptimizationEngine:
                     memoization_map[optree] = optree.get_precision()
                     return optree.get_precision()
                 else:
-                    new_precision = ML_Integer if isinstance(optree.get_value(), int) else ML_Float
+                    if default_precision:
+                      new_precision = default_precision
+                    else:
+                      new_precision = ML_Integer if isinstance(optree.get_value(), int) else ML_Float
                     optree.set_precision(new_precision)
                     memoization_map[optree] = new_precision
                     return new_precision
 
             elif isinstance(optree, Variable):
-                if optree.get_var_type() is Variable.Input:
-                    Log.report(Log.Error, "Input Variable %s has no defined precision" % optree.get_tag())
+                if optree.get_var_type() in [Variable.Input, Variable.Local]:
+                    Log.report(Log.Error, "%s Variable %s has no defined precision" % (optree.get_var_type(), optree.get_tag()))
                 else:
                     Log.report(Log.Error, "Variable %s error: only Input Variables are supported in instantiate_abstract_precision" % optree.get_tag())
 
@@ -511,9 +540,15 @@ class OptimizationEngine:
                     self.instantiate_abstract_precision(inp, default_precision, memoization_map = memoization_map)
                 memoization_map[optree] = None
                 return None
-              
 
             elif isinstance(optree, Statement):
+                for inp in optree.inputs:
+                    self.instantiate_abstract_precision(inp, default_precision, memoization_map = memoization_map)
+
+                memoization_map[optree] = None
+                return None
+
+            elif isinstance(optree, Loop):
                 for inp in optree.inputs:
                     self.instantiate_abstract_precision(inp, default_precision, memoization_map = memoization_map)
 
@@ -606,6 +641,8 @@ class OptimizationEngine:
             return False
 
         def common_ancestor(parent_list_0, parent_list_1):
+            """ search the closest node of parent_list_0, 
+                also registered in parent_list_1 """
             for b in parent_list_0[::-1]:
                 if b in parent_list_1:
                     return b
@@ -631,8 +668,14 @@ class OptimizationEngine:
                 self.subexpression_sharing(op, sharing_map, [{}] + level_sharing_map, current_parent_list + [optree])
 
         elif isinstance(optree, Statement):
-            for op in optree.inputs:
-                self.subexpression_sharing(op, sharing_map, [{}] + level_sharing_map, current_parent_list)
+            if not optree.get_prevent_optimization(): 
+              for op in optree.inputs:
+                  self.subexpression_sharing(op, sharing_map, [{}] + level_sharing_map, current_parent_list)
+
+        elif isinstance(optree, Loop):
+            pass
+            #for op in optree.inputs:
+            #    self.subexpression_sharing(op, sharing_map, [{}] + level_sharing_map, current_parent_list)
 
         elif isinstance(optree, ML_LeafNode):
             pass
@@ -651,7 +694,8 @@ class OptimizationEngine:
 
 
     def extract_fast_path(self, optree):
-        """ extracting fast path (most likely execution) from <optree> """
+        """ extracting fast path (most likely execution path leading 
+            to a Return operation) from <optree> """
         if isinstance(optree, ConditionBlock):
             cond = optree.inputs[0]
             likely = cond.get_likely()
@@ -674,6 +718,54 @@ class OptimizationEngine:
             return optree.inputs[0]
         else:
             return None
+
+
+    ## extract a linear execution path from optree by chosing
+    #  most likely side on each conditional branch
+    #  @param optree operation tree to extract fast path from
+    #  @param fallback_policy lambda function cond, cond_block, if_branch, else_branch: branch_to_consider, validity_mask_list
+    #  @return tuple linearized optree, validity mask list
+    def extract_vectorizable_path(self, optree, fallback_policy, bool_precision = ML_Bool):
+        """ look for the most likely Return statement """
+        if isinstance(optree, ConditionBlock):
+            cond   = optree.inputs[0]
+            likely = cond.get_likely()
+            linearized_optree, validity_mask_list = self.extract_vectorizable_path(optree.get_pre_statement(), fallback_policy)
+            if not linearized_optree is None:
+              return linearized_optree, validity_mask_list
+            else:
+              if likely:
+                  if_branch = optree.inputs[1]
+                  linearized_optree, validity_mask_list = self.extract_vectorizable_path(if_branch, fallback_policy)
+                  return  linearized_optree, (validity_mask_list + [cond])
+              elif likely == False:
+                  if len(optree.inputs) >= 3:
+                    # else branch exists
+                    else_branch = optree.inputs[2]
+                    linearized_optree, validity_mask_list = self.extract_vectorizable_path(else_branch, fallback_policy)
+                    return  linearized_optree, (validity_mask_list + [LogicalNot(cond, precision = bool_precision)])
+                  else:
+                    # else branch does not exists
+                    return None, []
+              elif len(optree.inputs) >= 2:
+                  # using fallback policy
+                  if_branch = optree.inputs[1]
+                  else_branch = optree.inputs[2]
+                  selected_branch, cond_mask_list = fallback_policy(cond, optree, if_branch, else_branch)
+                  linearized_optree, validity_mask_list = self.extract_vectorizable_path(selected_branch, fallback_policy)
+                  return  linearized_optree, (cond_mask_list + validity_mask_list)
+              else:
+                  return None, []
+        elif isinstance(optree, Statement):
+            for sub_stat in optree.inputs:
+                linearized_optree, validity_mask_list = self.extract_vectorizable_path(sub_stat, fallback_policy)
+                if not linearized_optree is None: 
+                  return linearized_optree, validity_mask_list
+            return None, []
+        elif isinstance(optree, Return):
+            return optree.inputs[0], []
+        else:
+            return None, []
 
     def factorize_fast_path(self, optree):
         """ extract <optree>'s fast path and add it to be pre-computed at 
@@ -706,6 +798,12 @@ class OptimizationEngine:
                     memoization[optree] = optree
                     return optree
 
+                elif True in [(op.get_debug() != None and isinstance(op, Multiplication)) for op in optree.inputs]:
+                    # exclude node with debug operands
+                    optree.inputs = tuple(self.fuse_multiply_add(op, silence = silence, memoization = memoization) for op in optree.inputs)
+                    memoization[optree] = optree
+                    return optree
+
                 elif self.get_dot_product_enabled() and isinstance(optree.inputs[0], Multiplication) and isinstance(optree.inputs[1], Multiplication) and not optree.inputs[0].get_prevent_optimization() and not optree.inputs[1].get_prevent_optimization():
                     specifier = FusedMultiplyAdd.DotProductNegate if isinstance(optree, Subtraction) else FusedMultiplyAdd.DotProduct 
                     mult0 = self.fuse_multiply_add(optree.inputs[0].inputs[0], silence = silence, memoization = memoization)
@@ -730,12 +828,10 @@ class OptimizationEngine:
                     mult1 = self.fuse_multiply_add(optree.inputs[0].inputs[1], silence = silence, memoization = memoization)
                     addend = self.fuse_multiply_add(optree.inputs[1], silence = silence, memoization = memoization)
 
-                    #print "fusing fma label", optree.get_interval()
                     new_op = FusedMultiplyAdd(mult0, mult1, addend, specifier = specifier)
                     new_op.attributes = optree.attributes.get_light_copy()
                     new_op.set_silent(silence)
                     new_op.set_index(optree.get_index())
-                    #print "fusing fma label", mult0.get_interval(), mult1.get_interval(), addend.get_interval()
 
                     # propagating exact attribute
                     if optree.inputs[0].get_exact() and optree.get_exact():
@@ -815,7 +911,7 @@ class OptimizationEngine:
             code_gen_key = optree.get_codegen_key()
             if code_gen_key in support_simplification[optree.__class__]:
                 for cond in support_simplification[optree.__class__][code_gen_key]:
-                    if cond(optree): return True
+                  if cond(optree): return True
         return False
 
     def get_support_simplification(self, optree):
@@ -825,11 +921,24 @@ class OptimizationEngine:
                 return support_simplification[optree.__class__][code_gen_key][cond](optree, self.processor)
         Log.report(Log.Error, "support simplification mapping not found")
 
+    def recursive_swap_format(self, optree, old_format, new_format, memoization_map = None):
+      memoization_map = {} if memoization_map is None else memoization_map
+      if optree in memoization_map:
+        return
+      else:
+        if optree.get_precision() is old_format:
+          optree.set_precision(new_format)
+        memoization_map[optree] = optree
+        for node in optree.get_inputs() + optree.get_extra_inputs():
+          self.recursive_swap_format(node, old_format, new_format)
+
+      
+
 
     def check_processor_support(self, optree, memoization_map = {}, debug = False):
         """ check if all precision-instantiated operation are supported by the processor """
         if debug:
-          print "checking processor support: ", self.processor.__class__
+          print "checking processor support: ", self.processor.__class__ # Debug print
         if  optree in memoization_map:
             return True
         if not isinstance(optree, ML_LeafNode):
@@ -840,6 +949,8 @@ class OptimizationEngine:
                 self.check_processor_support(optree.get_pre_statement(), memoization_map, debug = debug)
                 pass
             elif isinstance(optree, Statement):
+                pass
+            elif isinstance(optree, Loop):
                 pass
             elif isinstance(optree, Return):
                 pass
@@ -853,6 +964,8 @@ class OptimizationEngine:
                   self.check_processor_support(op, memoization_map, debug = debug)
             elif not self.processor.is_supported_operation(optree, debug = debug):
                 # trying operand format escalation
+                init_optree = optree
+                old_list = optree.inputs
                 while optree.__class__ in type_escalation:
                     match_found = False
                     for result_type_cond in type_escalation[optree.__class__]:
@@ -877,17 +990,17 @@ class OptimizationEngine:
                     # look for possible simplification
                     if self.has_support_simplification(optree):
                         simplified_tree = self.get_support_simplification(optree)
-                        #Log.report(Log.Info, "simplifying %s" % optree.get_str(depth = 2, display_precision = True))
-                        #Log.report(Log.Info, "into %s" % simplified_tree.get_str(depth = 2, display_precision = True))
-
+                        Log.report(Log.Info, "simplifying %s" % optree.get_str(depth = 2, display_precision = True))
+                        Log.report(Log.Info, "into %s" % simplified_tree.get_str(depth = 2, display_precision = True))
                         optree.change_to(simplified_tree)
                         if self.processor.is_supported_operation(optree):
                             memoization_map[optree] = True
                             return True
                         
-                    print optree
-                    print self.processor.get_operation_keys(optree)
-                    print optree.get_str(display_precision = True, memoization_map = {})
+                    print optree # Error print
+                    print "pre escalation: ", old_list # Error print
+                    print self.processor.get_operation_keys(optree) # Error print
+                    print optree.get_str(display_precision = True, display_id = True, memoization_map = {}) # Error print
                     Log.report(Log.Error, "unsupported operation\n")
         # memoization
         memoization_map[optree] = True
@@ -920,6 +1033,10 @@ class OptimizationEngine:
 
         memoization_map[optree] = optree
         return optree
+
+
+    def static_vectorization(self, optree):
+      pass
         
 
 

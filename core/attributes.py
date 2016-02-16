@@ -13,9 +13,12 @@
 from ..utility.log_report import Log
 from ..utility.common import Callable
 
-
+## attribute initialization function (with default value when not initialized) 
+#  @param attrs is an attribute dictionnary
+#  @param attr_name is the name of the attribute to initialize
+#  @param default_value [None] is the value to be associated with the attribute if no value is found within attrs
+#  @param required [False] indicate whether the attribute may be omitted or not 
 def attr_init(attrs, attr_name, default_value = None, required = False):
-    """ attribute initialization function (with default value when not initialized) """
     if attr_name in attrs:
         return attrs[attr_name]
     else:
@@ -24,8 +27,15 @@ def attr_init(attrs, attr_name, default_value = None, required = False):
         else:
             return default_value
 
+
+## Debug attributes class to adapt the debug display message properties 
+#  @param display_format C string used when displaying debug message
+#  @param color of the debug message
+#  @param pre_process  pre_process function to be applied to the Node before display
+#  @param require_header list of headers required to generate the debug message
 class ML_Debug:
-    """ Debug attributes class to adapt the debug display message properties """
+    
+    ## initialization of a new ML_Debug object
     def __init__(self, display_format = None, color = None, pre_process = lambda v: v, require_header = []):
         self.display_format = display_format
         self.color = color
@@ -35,12 +45,30 @@ class ML_Debug:
     def get_display_format(self, default = "%f"):
         return self.display_format if self.display_format else default
 
-    def get_pre_process(self, value_to_display):
+    def get_pre_process(self, value_to_display, optree):
         return self.pre_process(value_to_display)
 
     def get_require_header(self):
         return self.require_header
 
+    def select_object(self, optree):
+        return self
+
+## debug object which automatically adapt to input parameters 
+class ML_MultiDebug(ML_Debug):
+  def __init__(self, debug_object_map, key_function = lambda optree: optree.get_precision()):
+    self.debug_object_map = debug_object_map
+    self.key_function = key_function
+
+  def select_object(self, optree): 
+    return self.debug_object_map[self.key_function(optree)]
+
+class ML_AdvancedDebug(ML_Debug):
+  def get_pre_process(self, value_to_display, optree):
+    return self.pre_process(value_to_display, optree)
+
+
+## Object to keep track of ML's node accross the several optimizations passes
 class Handle: 
     def __init__(self, node = None):
         self.node = node
@@ -52,6 +80,7 @@ class Handle:
         return self.node
 
 
+## Base class to store Node's attributes
 class Attributes: 
     """ Attribute management class for Metalibm's Operation """
     default_precision     = [None]

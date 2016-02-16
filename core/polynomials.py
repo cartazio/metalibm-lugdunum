@@ -15,7 +15,7 @@ from pythonsollya import *
 from ..utility.common import Callable
 from ..utility.log_report import Log
 from .ml_operations import Constant, Variable, Multiplication, Addition, Subtraction
-from .ml_formats import ML_FP_Format, ML_Format
+from .ml_formats import ML_Format, ML_FP_Format, ML_Fixed_Format
 
 class Polynomial:
     """ Mathematical polynomial object class """
@@ -116,19 +116,40 @@ class Polynomial:
     def build_from_approximation(function, poly_degree, coeff_formats, approx_interval, *modifiers):
         """ construct a polynomial object from a function approximation using sollya's fpminimax """
         Log.report(Log.Info,  "approx_interval: %s" % approx_interval)
-        precision_list = [(c.sollya_object if isinstance(c, ML_Format) else c) for c in coeff_formats]
+        precision_list = []
+        for c in coeff_formats:
+          if isinstance(c, ML_FP_Format):
+            precision_list.append(c.get_sollya_object())
+          elif isinstance(c, ML_Fixed_Format):
+            precision_list.append(c.get_bit_size())
+          else:
+            precision_list.append(c)
         sollya_poly = fpminimax(function, poly_degree, precision_list, approx_interval, *modifiers)
         return Polynomial(sollya_poly)
 
+
+    ## Approximation computation with built-in approximation error computation
+    #  @return a tuple poly_object, error: poly_object is a Polynomial 
+    #          approximating the given function on the given interval, 
+    #          according to parameter indications, error is the approximation
+    #          error on the interval
+    #  @param function mathematical function (pythonsollya object) describing the function to be approximated
+    #  @param poly_degree the degree of the approximation polynomial request
+    #  @param coeff_formats list of coefficient format (as expected by
+    #         (python)sollya fpminimax function, which describes the format
+    #         of each coefficient of the polynomial approximation
+    #  @param approx_interval the interval where the approximation applies
+    #  @param modifiers tuple of extra arguments (see (python)sollya's fpminimax documentation for more information, e.g absolute)
+    #  @param kwords dictionnary of extra arguments for the approximation computation (e.g tightness, error_function)
+    @staticmethod
     def build_from_approximation_with_error(function, poly_degree, coeff_formats, approx_interval, *modifiers, **kwords): 
         """ construct a polynomial object from a function approximation using sollya's fpminimax """
         tightness = kwords["tightness"] if "tightness" in kwords else S2**-24
         error_function = kwords["error_function"] if "error_function" in kwords else lambda p, f, ai, mod, t: supnorm(p, f, ai, mod, t)
-        Log.report(Log.Info,  "approx_interval: %s" % approx_interval)
         precision_list = []
         for c in coeff_formats:
             if isinstance(c, ML_FP_Format):
-                precision_list.append(c.sollya_object)
+                precision_list.append(c.get_sollya_object())
             else:
                 precision_list.append(c)
         sollya_poly = fpminimax(function, poly_degree, precision_list, approx_interval, *modifiers)
@@ -138,7 +159,7 @@ class Polynomial:
         return Polynomial(sollya_poly), approx_error
 
     build_from_approximation = Callable(build_from_approximation)
-    build_from_approximation_with_error = Callable(build_from_approximation_with_error)
+    #build_from_approximation_with_error = Callable(build_from_approximation_with_error)
 
 
 def generate_power(variable, power, power_map = {}, precision = None):
@@ -178,37 +199,37 @@ class PolynomialSchemeEvaluator:
         elif len(coeff_list) == 1:
             index, coeff = coeff_list[0]
             if index == 0:
-                return Constant(coeff, precision = cst_precision)
+                return Constant(coeff, precision = cst_precision, tag = "coeff_%d" % index)
             else:
-                return Multiplication(generate_power(variable, index, power_map, precision = unified_precision), Constant(coeff, precision = cst_precision))
+                return Multiplication(generate_power(variable, index, power_map, precision = unified_precision), Constant(coeff, precision = cst_precision), tag = "pm_%d" % index)
             
         current_index = coeff_list[0][0]
         current_scheme = Constant(coeff_list[0][1], precision = cst_precision)
         for index, coeff in coeff_list[1:-1]:
-            current_coeff = Constant(coeff, precision = cst_precision)
+            current_coeff = Constant(coeff, precision = cst_precision, tag = "coeff_%d" % index)
 
             index_diff = current_index - index
             current_index = index
 
             diff_power = generate_power(variable, index_diff, power_map, precision = unified_precision)
-            mult_op = Multiplication(diff_power, current_scheme, precision = unified_precision)
-            current_scheme = Addition(current_coeff, mult_op, precision = unified_precision)
+            mult_op = Multiplication(diff_power, current_scheme, precision = unified_precision, tag = "pm_%d" % index)
+            current_scheme = Addition(current_coeff, mult_op, precision = unified_precision, tag = "pa_%d" % index)
         # last coefficient
         index, coeff = coeff_list[-1]
-        current_coeff = Constant(coeff, precision = cst_precision)
+        current_coeff = Constant(coeff, precision = cst_precision, tag = "coeff_%d" % index)
         if (coeff == 1.0 or coeff == -1.0) and index <= 1:
             # generating FMA
             index_diff = current_index
 
             diff_power = generate_power(variable, index_diff, power_map, precision = unified_precision)
-            mult_op = Multiplication(diff_power, current_scheme, precision = unified_precision)
+            mult_op = Multiplication(diff_power, current_scheme, precision = unified_precision, tag = "pm_%d" % index)
             if index == 0:
-              current_scheme = Addition(current_coeff, mult_op, precision = unified_precision)
+              current_scheme = Addition(current_coeff, mult_op, precision = unified_precision, tag = "pa_%d" % index)
             elif index == 1:
               if coeff == 1.0:
-                current_scheme = Addition(variable, mult_op, precision = unified_precision)
+                current_scheme = Addition(variable, mult_op, precision = unified_precision, tag = "pa_%d" % index)
               elif coeff == -1.0:
-                current_scheme = Subtraction(mult_op, variable, precision = unified_precision)
+                current_scheme = Subtraction(mult_op, variable, precision = unified_precision, tag = "pa_%d" % index)
 
             
 

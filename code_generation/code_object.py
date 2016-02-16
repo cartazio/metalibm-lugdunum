@@ -16,7 +16,7 @@ from pythonsollya import *
 
 from ..core.ml_operations import Variable
 from .code_constant import C_Code, Gappa_Code
-from ..core.ml_formats import ML_GlobalRoundMode
+from ..core.ml_formats import ML_GlobalRoundMode, ML_Fixed_Format, ML_FP_Format
 
 from ..utility import version_info as ml_version_info
 
@@ -273,6 +273,8 @@ class CodeObject:
 
         return free_var_name
 
+    def get_free_name(self, var_type, prefix = "tmp"):
+        return self.symbol_table.get_free_name(var_type, prefix)
 
     def table_has_definition(self, table_object):
         return self.symbol_table.table_has_definition(table_object)
@@ -332,8 +334,8 @@ class GappaCodeObject(CodeObject):
         self.hypothesis_table = []
         self.goal_table = []
 
-    def add_hint(self, hypoth_code, goal_code):
-        self.hint_table.append((hypoth_code, goal_code))
+    def add_hint(self, hypoth_code, goal_code, annotation_code, isApprox = False):
+        self.hint_table.append((hypoth_code, goal_code, annotation_code, isApprox))
 
     def add_hypothesis(self, hypoth_code, hypoth_value):
         self.hypothesis_table.append((hypoth_code, hypoth_value))
@@ -343,15 +345,23 @@ class GappaCodeObject(CodeObject):
 
     def gen_hint(self):
         result = "#hints\n"
-        for hypoth_code, goal_code in self.hint_table:
-            result += "%s -> %s;\n\n" % (hypoth_code.get(), goal_code.get())
+        for hypoth_code, goal_code, annotation_code, isApprox in self.hint_table:
+            annotation_code = "{%s}" % annotation_code.get() if annotation_code is not None else ""
+            symbol = "~" if isApprox else "->"
+            result += "%s %s %s %s;\n\n" % (hypoth_code.get(), symbol, goal_code.get(), annotation_code)
         return result
 
     def gen_complete_goal(self):
-        result = "# goal\n"
-        hypothesis = " /\ ".join(["%s in %s" % (hc.get(), self.get_value_str(hv)) for hc, hv in self.hypothesis_table])
-        goal = " /\ ".join(["%s in %s" % (hc.get(), self.get_value_str(hv)) for hc, hv in self.goal_table])
-        result += "{ %s -> %s }\n\n" % (hypothesis, goal)
+        result = "# goalee\n"
+        hypothesis = []
+        for hc, hv in self.hypothesis_table:
+          hypothesis.append("%s in %s" % (hc.get(), self.get_value_str(hv)))
+          if isinstance(hc.precision, ML_Fixed_Format):
+            hypothesis.append("@FIX(%s,%s)" % (hc.get(), str(- hc.precision.get_frac_size())))
+          if isinstance(hc.precision, ML_FP_Format):
+            hypothesis.append("@FLT(%s,%s)" % (hc.get(), str(hc.precision.get_field_size()+1)))
+        goal = ["%s in %s" % (hc.get(), self.get_value_str(hv)) for hc, hv in self.goal_table]
+        result += "{ %s -> %s }\n\n" % (" /\ ".join(hypothesis), " /\ ".join(goal))
         return result
 
 
@@ -422,7 +432,6 @@ class NestedCode:
     def get_function_table(self):
         return self.static_function_table
         
-
     def add_header(self, header_file):
         self.main_code.add_header(header_file)
         
@@ -446,6 +455,14 @@ class NestedCode:
         level_code = self.code_list.pop(0)
         self << level_code.get(self.code_generator, static_cst = self.static_cst, static_table = self.static_table, skip_function = True) 
         self.code_list[0].close_level(cr = cr)
+
+    # @param function_object possible dummy FunctionObject associated with new function_name
+    def declare_free_function_name(self, prefix = "foo", function_object = None):
+        function_name = self.code_list[0].get_free_name(None, prefix = prefix) 
+        print "function_name: ", function_name
+        self.code_list[0].declare_function(function_name, function_object)
+        return function_name
+      
 
     def get_free_var_name(self, var_type, prefix = "tmp", declare = True):
         return self.code_list[0].get_free_var_name(var_type, prefix, declare)

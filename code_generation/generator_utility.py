@@ -2,10 +2,10 @@
 
 ###############################################################################
 # This file is part of Kalray's Metalibm tool
-# Copyright (2013)
+# Copyright (2013-2015)
 # All rights reserved
 # created:          Dec 24th, 2013
-# last-modified:    Apr  4th, 2014
+# last-modified:    Oct  6th, 2015
 #
 # author(s): Nicolas Brunie (nicolas.brunie@kalray.eu)
 ###############################################################################
@@ -13,7 +13,7 @@
 from ..utility.log_report import Log
 from ..utility.common import ML_NotImplemented, zip_index
 from ..core.ml_formats import *
-from .code_element import CodeVariable, CodeExpression, CodeFunction
+from .code_element import CodeVariable, CodeExpression
 from .code_constant import C_Code, Gappa_Code
 
 
@@ -136,7 +136,7 @@ class CompoundOperator(ML_CG_Operator):
                 if dummy_precision == None:
                     dummy_precision = code_generator.get_unknown_precision()
                     if dummy_precision == None:
-                        print optree.get_str(depth = 2, display_precision = True)
+                        print optree.get_str(depth = 2, display_precision = True) # Error display
                         Log.report(Log.Error, "unknown output precision in compound operator")
             
                 dummy_optree = DummyTree("carg", dummy_precision)
@@ -195,7 +195,10 @@ class IdentityOperator(ML_CG_Operator):
             code_object << code_generator.generate_assignation(result_varname, result_code) 
             return CodeVariable(result_varname, optree.get_precision())
         else:
-            return CodeExpression("(%s)" % result_code, optree.get_precision())
+            if self.no_parenthesis:
+                return CodeExpression("%s" % result_code, optree.get_precision())
+            else:
+                return CodeExpression("(%s)" % result_code, optree.get_precision())
 
 
 class SymbolOperator(ML_CG_Operator):
@@ -276,6 +279,21 @@ class FO_Result:
   def get_output_precision(self):
     return self.output_precision
 
+class FO_ResultRef: 
+  """ PlaceHolder for a function Operator result
+      can be used to allocate result passed by reference
+      as an operator arguments.
+      output_precision should be determined by the generate expression
+      function """
+  def __init__(self, index = 0, output_precision = None):
+    self.index = 0
+    self.output_precision = output_precision
+
+  def get_index(self):
+    return self.index
+
+  def get_output_precision(self):
+    return self.output_precision
   
 
 class FunctionOperator(ML_CG_Operator):
@@ -303,6 +321,9 @@ class FunctionOperator(ML_CG_Operator):
         elif isinstance(arg_index, FO_Result):
           return result_args_map[arg_index.get_index()]
           # return FO_Result(arg_index.get_index(), arg_index.get_output_precision()) 
+
+        elif isinstance(arg_index, FO_ResultRef):
+          return CodeExpression("&%s" % result_args_map[arg_index.get_index()].get(), None)
 
         else:
           return CodeExpression(arg_map[index], None)
@@ -344,7 +365,7 @@ class FunctionOperator(ML_CG_Operator):
         result_args_map = {}
         for arg_index in self.arg_map:
           arg = self.arg_map[arg_index]
-          if isinstance(arg, FO_Result):
+          if isinstance(arg, FO_Result) or isinstance(arg, FO_ResultRef):
             prefix = optree.get_tag(default = "tmp")
             result_varname = result_var if result_var != None else code_object.get_free_var_name(optree.get_precision(), prefix = prefix)
             result_in_args = CodeVariable(result_varname, optree.get_precision())
@@ -450,26 +471,26 @@ class RoundOperator(FunctionOperator):
     """ Rounding operator """
 
     def __init__(self, precision, direction = ML_RoundToNearest, **kwords): 
-        round_name = {
-            ML_Binary32: {
-                ML_RoundToNearest: "float<ieee_32, ne>",
-            },
-            ML_Binary64: {
-                ML_RoundToNearest: "float<ieee_64, ne>",
-            },
-            ML_Int32: {
-                ML_RoundToNearest: "int<ne>",
-            },
-            ML_UInt32: {
-                ML_RoundToNearest: "int<ne>",
-            },
-            ML_Int64: {
-                ML_RoundToNearest: "int<ne>",
-            },
-        }[precision][direction]
+        directions_strings = {
+          ML_RoundToNearest: "ne",
+          ML_RoundTowardZero: "zr",
+          ML_RoundTowardPlusInfty: "up",
+          ML_RoundTowardMinusInfty: "dn",
+        }
+        if isinstance(precision, ML_FP_Format):
+          if precision == ML_Binary64:
+            round_name = "float<ieee_64, " + directions_strings[direction] + ">"
+          elif precision == ML_Binary32:
+            round_name = "float<ieee_32, " + directions_strings[direction] + ">"
+          else:
+            raise ValueError("Unknow floating point precision: ", precision)
+        elif isinstance(precision, ML_Fixed_Format):
+          round_name = "fixed<" + str(-precision.get_frac_size()) + ", " + directions_strings[direction] + ">"
+        else:
+          raise ValueError("Unknow precision type (is neither Fixed of Floating): ", precision)
         FunctionOperator.__init__(self, round_name, arity = 1, **kwords)
 
-        
+
     def assemble_code(self, code_generator, code_object, optree, var_arg_list, generate_pre_process = None, **kwords):
         # registering headers
         self.register_headers(code_object)
@@ -497,6 +518,33 @@ def type_all_match(*args, **kwords):
   """ match any type parameters """
   return True
 
+def type_std_integer_match(*arg, **kwords):
+  """ check that argument are all integers """
+  return all(map(is_std_integer_format, arg))
+
+## Type Class Match, used to described match-test function
+#  based on the class of the precision rather than the format itself
+class TCM:
+  """ Type Class Match """
+  def __init__(self, format_class):
+    self.format_class = format_class
+
+  def __call__(self, arg_format):
+    return isinstance(arg_format, self.format_class)
+
+
+## Format Strict match, used to described match-test function
+#  based on the strict comparison of argument formats against
+#  expected formats
+class FSM:
+  """ Format Strict Match """
+  def __init__(self, format_obj):
+    self.format_obj = format_obj
+
+  def __call__(self, arg_format):
+    return self.format_obj == arg_format
+
+
 class type_strict_match:
     def __init__(self, *type_tuple):
         """ check that argument and constrain type match strictly """
@@ -505,6 +553,38 @@ class type_strict_match:
     def __call__(self, *arg_tuple, **kwords):
         return self.type_tuple == arg_tuple
 
+class type_strict_match_list:
+    def __init__(self, *type_tuple_list):
+        """ check that argument and constrain type match strictly """
+        self.type_tuple_list = type_tuple_list
+
+    def __call__(self, *arg_tuple, **kwords):
+        for constraint_list, arg_format in zip(self.type_tuple_list, arg_tuple):
+          if not arg_format in constraint_list:
+            return False
+        return True
+
+class type_fixed_match: 
+    """ type_strict_match + match any instance of ML_Fixed_Format to 
+        ML_Fixed_Format descriptor """
+    def __init__(self, *type_tuple):
+        self.type_tuple = type_tuple
+
+    def __call__(self, *arg_tuple, **kwords):
+        return reduce(lambda acc, v: acc and (v[0] == v[1] or (v[0] == ML_Fixed_Format)) and isinstance(v[1], ML_Fixed_Format), zip(self.type_tuple, arg_tuple))
+
+class type_custom_match: 
+    """ type_strict_match + match any instance of ML_Fixed_Format to 
+        ML_Fixed_Format descriptor """
+    def __init__(self, *type_tuple):
+        self.type_tuple = type_tuple
+
+    def __call__(self, *arg_tuple, **kwords):
+        acc = True
+        for match_func, t in zip(self.type_tuple, arg_tuple):
+          acc = acc and match_func(t)
+        return acc
+        #return reduce((lambda acc, v: acc and (v[0](v[1]))), zip(self.type_tuple, arg_tuple))
 
 class type_relax_match:
     """ implement a relaxed type comparison including ML_Exact as possible true answer """
@@ -529,7 +609,7 @@ def type_function_match(*arg_tuple, **kwords): #optree = None):
     return type_strict_match(*arg_tuple)
 
 
-def build_simplified_operator_generation(precision_list, arity, operator, result_precision = None, explicit_rounding = False, match_function = type_strict_match, extend_exact = False, cond = lambda optree: True):
+def build_simplified_operator_generation_nomap(precision_list, arity, operator, result_precision = None, explicit_rounding = False, match_function = type_strict_match, extend_exact = False, cond = lambda optree: True):
     """ generate a code generation table for the interfaces describes in precision_list """
     result_map = {}
     for precision_hint in precision_list:
@@ -543,4 +623,7 @@ def build_simplified_operator_generation(precision_list, arity, operator, result
         # extending with exact version of the expression
         if extend_exact:
             result_map[type_result_match(ML_Exact)] = operator
-    return {cond: result_map}
+    return result_map
+
+def build_simplified_operator_generation(precision_list, arity, operator, result_precision = None, explicit_rounding = False, match_function = type_strict_match, extend_exact = False, cond = lambda optree: True):
+  return {cond: build_simplified_operator_generation_nomap(precision_list, arity, operator, result_precision, explicit_rounding, match_function, extend_exact, cond)}

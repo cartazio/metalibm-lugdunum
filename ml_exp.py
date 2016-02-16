@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#nyZeronyZero -*- coding: utf-8 -*-
 
 import sys
 
@@ -280,7 +280,11 @@ class ML_Exponential(ML_Function("ml_exp")):
                 poly_eval_error = max([sup(abs(err)) for err in poly_eval_error_dico])
             else:
                 poly_eval_error = 0.0
-                Log.report(Log.Warning, "gappa is not installed in this environnement")
+                sub_poly_eval_error = 0.9
+                Log.report(Log.Warning, "gappa is not installed in this environnement: poly degree statically set")
+                poly_degree = {ML_Binary32: 5, ML_Binary64: 7}[self.precision]
+                break
+                
             Log.report(Log.Info, "poly evaluation error: %s" % poly_eval_error)
             Log.report(Log.Info, "sub poly evaluation error: %s" % sub_poly_eval_error)
 

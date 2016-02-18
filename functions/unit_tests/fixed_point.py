@@ -13,9 +13,9 @@ from metalibm_core.core.ml_formats import *
 from metalibm_core.core.ml_complex_formats import * 
 
 from metalibm_core.code_generation.c_code_generator import CCodeGenerator
-from metalibm_core.code_generation.generic_processor import GenericProcessor
-from metalibm_core.code_generation.mpfr_backend import MPFRProcessor
-from metalibm_core.code_generation.fixed_point_backend import FixedPointBackend
+from metalibm_core.targets.generic_processor import GenericProcessor
+from metalibm_core.targets.mpfr_backend import MPFRProcessor
+from metalibm_core.targets.fixed_point_backend import FixedPointBackend
 from metalibm_core.code_generation.code_object import CodeObject
 from metalibm_core.code_generation.code_element import CodeFunction
 from metalibm_core.code_generation.code_constant import C_Code 

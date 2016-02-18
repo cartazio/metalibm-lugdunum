@@ -15,8 +15,8 @@ from metalibm_core.core.ml_table import ML_Table
 from metalibm_core.core.payne_hanek import generate_payne_hanek
 
 from metalibm_core.code_generation.c_code_generator import CCodeGenerator
-from metalibm_core.code_generation.generic_processor import GenericProcessor
-from metalibm_core.code_generation.mpfr_backend import MPFRProcessor
+from metalibm_core.targets.generic_processor import GenericProcessor
+from metalibm_core.targets.mpfr_backend import MPFRProcessor
 
 
 from metalibm_core.code_generation.gappa_code_generator import GappaCodeGenerator

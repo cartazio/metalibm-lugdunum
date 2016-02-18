@@ -8,7 +8,7 @@ from core.attributes import ML_Debug
 from core.ml_operations import *
 from core.ml_formats import *
 from code_generation.c_code_generator import CCodeGenerator
-from code_generation.generic_processor import GenericProcessor
+from targets.generic_processor import GenericProcessor
 from code_generation.code_object import CodeObject
 from code_generation.code_element import CodeFunction
 from code_generation.code_constant import C_Code 

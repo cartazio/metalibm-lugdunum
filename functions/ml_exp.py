@@ -7,8 +7,8 @@ from pythonsollya import *
 from metalibm_core.core.attributes import ML_Debug
 from metalibm_core.core.ml_operations import *
 from metalibm_core.core.ml_formats import *
-from metalibm_core.code_generation.generic_processor import GenericProcessor
-from metalibm_core.code_generation.vector_backend import VectorBackend
+from metalibm_core.targets.generic_processor import GenericProcessor
+from metalibm_core.targets.vector_backend import VectorBackend
 from metalibm_core.core.polynomials import *
 from metalibm_core.core.ml_table import ML_Table
 from metalibm_core.core.ml_function import ML_Function, ML_FunctionBasis

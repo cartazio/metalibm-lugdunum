@@ -15,12 +15,12 @@ from metalibm_core.core.ml_function import ML_Function, ML_FunctionBasis
 from metalibm_core.core.attributes import ML_Debug
 from metalibm_core.core.ml_operations import *
 from metalibm_core.core.ml_formats import *
-from metalibm_core.code_generation.generic_processor import GenericProcessor
+from metalibm_core.targets.generic_processor import GenericProcessor
 from metalibm_core.core.polynomials import *
 from metalibm_core.core.ml_table import ML_Table
 from metalibm_core.core.ml_complex_formats import ML_Mpfr_t
 from metalibm_core.code_generation.generator_utility import FunctionOperator, FO_Result, FO_Arg
-from metalibm_core.code_generation.fixed_point_backend import FixedPointBackend
+from metalibm_core.targets.fixed_point_backend import FixedPointBackend
 
 from metalibm_core.core.payne_hanek import generate_payne_hanek
 

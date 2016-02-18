@@ -24,7 +24,7 @@ from code_generation.gappa_code_generator import GappaCodeGenerator
 
 from utility.gappa_utils import execute_gappa_script_extract
 from utility.log_report import Log
-from utility.common import test_flag_option, extract_option_value  
+from metalibm_core.utility.arg_utils import test_flag_option, extract_option_value
 
 from ml_functions.ml_template import ML_ArgTemplate
 

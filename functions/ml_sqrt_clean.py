@@ -23,7 +23,7 @@ from metalibm_core.code_generation.gappa_code_generator import GappaCodeGenerato
 
 from metalibm_core.utility.gappa_utils import execute_gappa_script_extract
 from metalibm_core.utility.log_report import Log
-from metalibm_core.utility.common import test_flag_option, extract_option_value  
+from metalibm_core.utility.arg_utils import test_flag_option, extract_option_value
 
 from metalibm_core.utility.ml_template import ML_ArgTemplate
 

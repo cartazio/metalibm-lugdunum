@@ -608,7 +608,7 @@ generic_approx_table_map = {
     },
 }
 
-class AbstractProcessor: 
+class AbstractProcessor(object):
     """ base abstract processor """
     pass
 

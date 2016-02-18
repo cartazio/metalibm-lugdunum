@@ -37,7 +37,7 @@ debug_ftox_fp64 = ML_Debug(display_format = "%\"PRIx64\"", pre_process = lambda 
 debug_ftox_fp32 = ML_Debug(display_format = "%\"PRIx32\"", pre_process = lambda v: "float_to_32b_encoding(%s)" % v)
 
 
-class NR_Iteration: 
+class NR_Iteration(object):
     def __init__(self, value, approx, half_value):
         Attributes.set_default_rounding_mode(ML_RoundToNearest)
         Attributes.set_default_silent(True)
@@ -117,7 +117,7 @@ def compute_sqrt(vx, init_approx, debug_lftolx, precision = ML_Binary64):
     return R
 
 
-class ML_Sqrt:
+class ML_Sqrt(object):
     def __init__(self, 
                  precision = ML_Binary32, 
                  abs_accuracy = S2**-24, 

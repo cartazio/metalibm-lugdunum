@@ -15,7 +15,7 @@ from .code_object import NestedCode
 from .generator_utility import FunctionOperator, FO_Arg
 
 
-class CodeFunction:
+class CodeFunction(object):
   """ function code object """
   def __init__(self, name, arg_list = None, output_format = None, code_object = None):
     """ code function initialization """

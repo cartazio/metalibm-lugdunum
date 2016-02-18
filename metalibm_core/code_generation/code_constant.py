@@ -10,8 +10,8 @@
 # author(s): Nicolas Brunie (nicolas.brunie@kalray.eu)
 ###############################################################################
 
-class C_Code:
+class C_Code(object):
     pass
 
-class Gappa_Code:
+class Gappa_Code(object):
     pass

@@ -3,21 +3,21 @@
 import commands
 
 
-import metalibm_functions.ml_log10
-import metalibm_functions.ml_log1p
-import metalibm_functions.ml_log2
-import metalibm_functions.ml_log
+import functions.ml_log10
+import functions.ml_log1p
+import functions.ml_log2
+import functions.ml_log
 
 # old scheme
 old_scheme_function_list = [
-  metalibm_functions.ml_log1p.ML_Log1p,
-  metalibm_functions.ml_log.ML_Log,
+  functions.ml_log1p.ML_Log1p,
+  functions.ml_log.ML_Log,
 ]
 
 # new scheme (ML_Function)
 new_scheme_function_list = [
-  metalibm_functions.ml_log2.ML_Log2,
-  metalibm_functions.ml_log10.ML_Log10,
+  functions.ml_log2.ML_Log2,
+  functions.ml_log10.ML_Log10,
 ]
 
 def old_scheme_test(function_ctor, options = []):

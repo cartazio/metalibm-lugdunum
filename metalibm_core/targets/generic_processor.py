@@ -11,9 +11,9 @@
 ###############################################################################
 
 from ..utility.log_report import *
-from .generator_utility import *
-from .code_element import *
-from .complex_generator import *
+from ..code_generation.generator_utility import *
+from ..code_generation.code_element import *
+from ..code_generation.complex_generator import *
 from ..core.ml_formats import *
 from ..core.ml_table import ML_ApproxTable
 from ..core.ml_operations import *

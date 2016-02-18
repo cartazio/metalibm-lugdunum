@@ -19,7 +19,7 @@ from .log_report import Log
 
 from ..core.ml_formats import *
 
-from ..code_generation.generic_processor import GenericProcessor
+from ..targets.generic_processor import GenericProcessor
 from ..core.target import TargetRegister
 from ..targets import *
 from ..code_generation.code_constant import *

@@ -12,8 +12,8 @@
 ###############################################################################
 
 from ..utility.log_report import *
-from .generator_utility import *
-from .complex_generator import *
+from ..code_generation.generator_utility import *
+from ..code_generation.complex_generator import *
 from ..core.ml_formats import *
 from ..core.ml_operations import *
 from .generic_processor import GenericProcessor, LibFunctionConstructor

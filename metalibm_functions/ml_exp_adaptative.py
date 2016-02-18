@@ -8,7 +8,7 @@ from metalibm_core.core.attributes import ML_Debug
 from metalibm_core.core.ml_operations import *
 from metalibm_core.core.ml_formats import *
 from metalibm_core.code_generation.c_code_generator import CCodeGenerator
-from metalibm_core.code_generation.generic_processor import GenericProcessor
+from metalibm_core.targets.generic_processor import GenericProcessor
 from metalibm_core.code_generation.code_object import CodeObject
 from metalibm_core.code_generation.code_element import CodeFunction
 from metalibm_core.code_generation.generator_utility import C_Code 

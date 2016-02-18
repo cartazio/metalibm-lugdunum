@@ -36,7 +36,7 @@ then
   git checkout $BRANCH;
 fi;
 
-git submodule update --init --recursive && \ 
+git submodule update --init --recursive && \
 cd $LOCAL_DIR && \
 mkdir -p $INSTALL_DIR || exit 1
 
